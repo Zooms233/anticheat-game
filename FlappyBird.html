@@ -77,7 +77,8 @@
         <div>游戏结束</div>
         <div>得分: <span id="finalScore">0</span></div>
         <div id="countdownMessage"></div> <!-- 用于显示倒计时消息 -->
-        <!-- 移除了重新开始按钮 -->
+        <!-- 添加手动关闭按钮 -->
+        <button id="closeWindowButton" style="margin-top: 20px;">手动关闭窗口</button>
     </div>
 </div>
 
@@ -89,7 +90,7 @@
     const finalScoreElement = document.getElementById('finalScore');
     const countdownMessageElement = document.getElementById('countdownMessage'); // 获取倒计时元素
     const startButton = document.getElementById('startButton');
-    // 移除了 restartButton 的引用
+    const closeWindowButton = document.getElementById('closeWindowButton'); // 获取手动关闭按钮
 
     // 游戏常量
     const GRAVITY = 0.5;
@@ -400,33 +401,23 @@
         let countdown = GAME_OVER_DELAY / 1000; // 将毫秒转换为秒
 
         // 立即显示初始倒计时
-        countdownMessageElement.textContent = `${countdown} 秒后关闭窗口...`;
+        countdownMessageElement.textContent = `${countdown} 秒后尝试关闭窗口...`;
 
         // 启动倒计时
         countdownInterval = setInterval(() => {
             countdown--;
             if (countdown > 0) {
-                countdownMessageElement.textContent = `${countdown} 秒后关闭窗口...`;
+                countdownMessageElement.textContent = `${countdown} 秒后尝试关闭窗口...`;
             } else {
                 // 倒计时结束
                 clearInterval(countdownInterval);
-                countdownMessageElement.textContent = "正在关闭窗口...";
+                countdownMessageElement.textContent = "若无反应，请点击下方按钮手动关闭";
                 
                 // 设置最终关闭窗口的定时器
                 closeWindowTimeout = setTimeout(() => {
                     // 尝试关闭窗口
                     window.close();
-                    
-                    // 如果 window.close() 被浏览器阻止，
-                    // 可以在这里添加一些备选方案，例如：
-                    // 1. 显示一条消息提示用户手动关闭
-                    // 2. 跳转到一个空白页面
-                    // 3. 或者简单地停止所有游戏逻辑
-                    
-                    // 示例：显示提示信息（可选）
-                    // console.log("尝试关闭窗口，如果未关闭，请手动关闭标签页。");
-                    // gameOverScreen.innerHTML = "<div>游戏结束</div><div>请手动关闭此标签页</div>";
-                    
+                    // 无论成功与否，都不再修改提示信息，让用户看到“点击按钮关闭”的提示
                 }, 1000); // 倒计时结束后1秒执行关闭
             }
         }, 1000); // 每秒更新一次倒计时
@@ -435,7 +426,10 @@
     // 事件监听
     canvas.addEventListener('click', jump);
     startButton.addEventListener('click', startGame);
-    // 移除了 restartButton 的事件监听
+    // 为手动关闭按钮添加事件监听
+    closeWindowButton.addEventListener('click', () => {
+        window.close();
+    });
 
     // 初始状态：显示开始界面
     initGame();
