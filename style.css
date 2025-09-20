@@ -1,5 +1,15 @@
 @import url('https://fonts.googleapis.com/css?family=Open+Sans:300,700|Quattrocento:700');
 
+.rule{
+    color: blue;
+ }
+.tip {
+    color: yellowgreen;
+ }
+.danger {
+    color: red;
+ }
+
 body {
     font-family: 'Open Sans', sans-serif;
     font-weight: lighter;
