@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #87CEEB; /* 天空蓝 */
+            font-family: Arial, sans-serif;
+            overflow: hidden; /* 隐藏滚动条 */
+        }
+        #gameContainer {
+            position: relative;
+            width: 400px;
+            height: 600px;
+        }
+        #gameCanvas {
+            border: 2px solid #000;
+            background-color: #87CEEB; /* 天空蓝 */
+        }
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.5); /* 半透明背景 */
+            color: white;
+            font-size: 30px;
+            text-align: center;
+            display: none; /* 默认隐藏 */
+            z-index: 10; /* 确保在画布之上 */
+        }
+        #startScreen {
+            display: flex; /* 初始显示开始界面 */
+        }
+        button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 20px;
+            cursor: pointer;
+            background-color: #FFD700;
+            border: none;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #FFC000;
+        }
+        #countdownMessage {
+            font-size: 24px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="gameContainer">
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    
+    <div id="startScreen" class="screen">
+        <div>Flappy Bird</div>
+        <button id="startButton">开始游戏</button>
+    </div>
+
+    <div id="gameOverScreen" class="screen">
+        <div>游戏结束</div>
+        <div>得分: <span id="finalScore">0</span></div>
+        <div id="countdownMessage"></div> <!-- 用于显示倒计时消息 -->
+        <!-- 移除了重新开始按钮 -->
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const startScreen = document.getElementById('startScreen');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const finalScoreElement = document.getElementById('finalScore');
+    const countdownMessageElement = document.getElementById('countdownMessage'); // 获取倒计时元素
+    const startButton = document.getElementById('startButton');
+    // 移除了 restartButton 的引用
+
+    // 游戏常量
+    const GRAVITY = 0.5;
+    const JUMP_FORCE = -10;
+    const PIPE_WIDTH = 70;
+    const PIPE_GAP = 150; // 管道间隙
+    const PIPE_SPEED = 3;
+    const GROUND_HEIGHT = 20;
+    const INITIAL_FLIGHT_DURATION = 120; // 2秒 * 60帧/秒
+    const BACKGROUND_SPEED = 1; // 背景移动速度
+    const GAME_OVER_DELAY = 3000; // 游戏结束后的延迟时间（毫秒）
+
+    // 游戏变量
+    let bird, pipes, score, gameRunning, frames, initialFlightFrames, backgroundOffset;
+    let closeWindowTimeout; // 用于存储关闭窗口的定时器ID
+    let countdownInterval; // 用于存储倒计时的间隔ID
+
+    // --- 小鸟成长相关 ---
+    // 创建一个离屏 canvas 来绘制小鸟精灵图
+    const birdSpriteCanvas = document.createElement('canvas');
+    birdSpriteCanvas.width = 60; // 精灵图宽度 (3帧 * 20px)
+    birdSpriteCanvas.height = 20; // 精灵图高度
+    const birdSpriteCtx = birdSpriteCanvas.getContext('2d');
+
+    // 绘制小鸟精灵图 (简化为三个不同颜色的矩形代表三帧动画)
+    function createBirdSprite() {
+        for (let i = 0; i < 3; i++) {
+            birdSpriteCtx.fillStyle = i === 0 ? '#FFD700' : i === 1 ? '#FFA500' : '#FF8C00';
+            birdSpriteCtx.fillRect(i * 20, 0, 20, 20);
+            
+            // 在每个帧上绘制小鸟的眼睛
+            birdSpriteCtx.fillStyle = 'black';
+            birdSpriteCtx.beginPath();
+            birdSpriteCtx.arc(i * 20 + 15, 8, 2, 0, Math.PI * 2);
+            birdSpriteCtx.fill();
+        }
+    }
+    createBirdSprite(); // 初始化精灵图
+
+    // --- 背景相关 ---
+    // 创建一个简单的背景图案 (云朵和地面)
+    const backgroundPatternCanvas = document.createElement('canvas');
+    backgroundPatternCanvas.width = canvas.width * 2; // 画得宽一些以便无缝滚动
+    backgroundPatternCanvas.height = canvas.height;
+    const bgCtx = backgroundPatternCanvas.getContext('2d');
+    
+    // 绘制背景图案
+    function createBackgroundPattern() {
+        // 填充天空背景
+        bgCtx.fillStyle = '#87CEEB';
+        bgCtx.fillRect(0, 0, backgroundPatternCanvas.width, backgroundPatternCanvas.height);
+
+        // 绘制一些随机的云朵
+        bgCtx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        for (let i = 0; i < 10; i++) {
+            const x = Math.random() * backgroundPatternCanvas.width;
+            const y = Math.random() * (canvas.height - GROUND_HEIGHT - 100);
+            const w = 60 + Math.random() * 40;
+            const h = 20 + Math.random() * 20;
+            bgCtx.beginPath();
+            bgCtx.arc(x, y, w/3, 0, Math.PI * 2);
+            bgCtx.arc(x + w/3, y - h/4, w/4, 0, Math.PI * 2);
+            bgCtx.arc(x + 2*w/3, y, w/3, 0, Math.PI * 2);
+            bgCtx.fill();
+        }
+
+        // 绘制地面
+        bgCtx.fillStyle = '#8B4513'; // 棕色地面
+        bgCtx.fillRect(0, canvas.height - GROUND_HEIGHT, backgroundPatternCanvas.width, GROUND_HEIGHT);
+        
+        // 地面纹理线
+        bgCtx.strokeStyle = '#A0522D';
+        bgCtx.lineWidth = 1;
+        for(let i = 0; i < backgroundPatternCanvas.width; i += 20) {
+            bgCtx.beginPath();
+            bgCtx.moveTo(i, canvas.height - GROUND_HEIGHT);
+            bgCtx.lineTo(i + 10, canvas.height);
+            bgCtx.stroke();
+        }
+    }
+    createBackgroundPattern(); // 初始化背景图案
+
+     // --- 游戏逻辑 ---
+
+    // 初始化游戏对象
+    function initGame() {
+        bird = {
+            x: 100,
+            y: canvas.height / 2,
+            velocity: 0,
+            rotation: 0, // 用于模拟飞行姿态
+            frame: 0,   // 当前动画帧
+            counter: 0  // 动画帧计数器
+        };
+        pipes = [];
+        score = 0;
+        gameRunning = false;
+        frames = 0;
+        initialFlightFrames = 0;
+        backgroundOffset = 0; // 背景偏移量
+        
+        // 清除之前的定时器（如果存在）
+        if (closeWindowTimeout) {
+            clearTimeout(closeWindowTimeout);
+            closeWindowTimeout = null;
+        }
+        if (countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+        }
+    }
+
+    // 绘制小鸟
+    function drawBird() {
+        ctx.save();
+        ctx.translate(bird.x, bird.y);
+        
+        // 根据是否在初始平飞阶段来决定是否旋转
+        if (initialFlightFrames >= INITIAL_FLIGHT_DURATION) {
+            // 根据速度调整角度，模拟飞行姿态
+            bird.rotation = Math.max(-30, Math.min(90, bird.velocity * 3)); // 限制角度范围
+        } else {
+            bird.rotation = 0; // 初始平飞阶段，角度为0
+        }
+        ctx.rotate(bird.rotation * Math.PI / 180);
+        
+        // 更新动画帧
+        bird.counter = (bird.counter + 1) % 10; // 每10帧切换一次
+        if (bird.counter === 0) {
+            bird.frame = (bird.frame + 1) % 3;
+        }
+
+        // 从精灵图中绘制当前帧
+        ctx.drawImage(
+            birdSpriteCanvas,
+            bird.frame * 20, 0, 20, 20, // 源矩形 (sx, sy, sWidth, sHeight)
+            -10, -10, 20, 20            // 目标矩形 (dx, dy, dWidth, dHeight) - 居中绘制
+        );
+        
+        ctx.restore();
+    }
+
+    // 绘制背景
+    function drawBackground() {
+        // 使用平铺的方式绘制背景，实现无缝滚动效果
+        const pattern = ctx.createPattern(backgroundPatternCanvas, 'repeat-x');
+        ctx.fillStyle = pattern;
+        // 背景向左移动
+        ctx.translate(-backgroundOffset, 0);
+        ctx.fillRect(backgroundOffset, 0, backgroundPatternCanvas.width, canvas.height);
+        ctx.translate(backgroundOffset, 0); // 重置变换
+    }
+
+    // 绘制管道
+    function drawPipes() {
+        pipes.forEach(pipe => {
+            // 绘制管道阴影
+            ctx.fillStyle = 'rgba(0, 100, 0, 0.5)'; // 深绿色半透明阴影
+            ctx.fillRect(pipe.x + 5, 0, PIPE_WIDTH, pipe.topHeight);
+            ctx.fillRect(pipe.x + 5, pipe.topHeight + PIPE_GAP, PIPE_WIDTH, canvas.height - pipe.topHeight - PIPE_GAP);
+            
+            // 绘制管道主体
+            ctx.fillStyle = '#228B22'; // 绿色管道
+            ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
+            ctx.fillRect(pipe.x, pipe.topHeight + PIPE_GAP, PIPE_WIDTH, canvas.height - pipe.topHeight - PIPE_GAP);
+            
+            // 管道顶部装饰
+            ctx.fillStyle = '#006400';
+            ctx.fillRect(pipe.x - 3, pipe.topHeight - 15, PIPE_WIDTH + 6, 15);
+            ctx.fillRect(pipe.x - 3, pipe.topHeight + PIPE_GAP, PIPE_WIDTH + 6, 15);
+        });
+    }
+
+    // 更新游戏状态
+    function update() {
+        if (!gameRunning) return;
+
+        frames++;
+
+        // 更新背景
+        backgroundOffset = (backgroundOffset + BACKGROUND_SPEED) % backgroundPatternCanvas.width;
+
+        // 更新小鸟
+        if (initialFlightFrames < INITIAL_FLIGHT_DURATION) {
+            initialFlightFrames++;
+            // 在初始阶段，小鸟保持水平匀速飞行，不应用重力
+            // velocity 保持为 0
+        } else {
+            // 初始平飞结束后，恢复正常物理效果
+            bird.velocity += GRAVITY;
+            bird.y += bird.velocity;
+        }
+
+        // 更新管道 (只有在初始平飞结束后才开始生成和移动管道)
+        if (initialFlightFrames >= INITIAL_FLIGHT_DURATION) {
+            if (frames % 100 === 0) { // 每100帧生成一个新管道
+                const topHeight = Math.floor(Math.random() * (canvas.height - PIPE_GAP - GROUND_HEIGHT - 50)) + 20;
+                pipes.push({
+                    x: canvas.width,
+                    topHeight: topHeight,
+                    passed: false // 用于计分
+                });
+            }
+
+            pipes.forEach(pipe => {
+                pipe.x -= PIPE_SPEED;
+
+                // 计分逻辑
+                if (!pipe.passed && pipe.x + PIPE_WIDTH < bird.x) {
+                    pipe.passed = true;
+                    score++;
+                }
+            });
+
+            // 移除屏幕外的管道
+            pipes = pipes.filter(pipe => pipe.x + PIPE_WIDTH > 0);
+        }
+
+        // 碰撞检测 (始终进行，但要考虑地面高度)
+        if (
+            bird.y + 10 > canvas.height - GROUND_HEIGHT || // 撞地 (小鸟半径约10)
+            bird.y - 10 < 0 // 撞顶
+        ) {
+            endGame();
+            return;
+        }
+
+        // 检查与管道的碰撞 (只有在初始平飞结束后才检查)
+        if (initialFlightFrames >= INITIAL_FLIGHT_DURATION) {
+            for (let pipe of pipes) {
+                // 检查水平方向是否重叠 (简化为矩形碰撞)
+                if (bird.x + 10 > pipe.x && bird.x - 10 < pipe.x + PIPE_WIDTH) {
+                    // 检查垂直方向是否碰撞
+                    if (bird.y - 10 < pipe.topHeight || bird.y + 10 > pipe.topHeight + PIPE_GAP) {
+                        endGame();
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // 绘制游戏画面
+    function draw() {
+        // 清空画布
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 绘制背景
+        drawBackground();
+
+        // 绘制游戏对象
+        drawPipes();
+        drawBird();
+
+        // 绘制得分
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 24px Arial';
+        ctx.fillText('得分: ' + score, 10, 30);
+
+        // 可选：在初始平飞期间显示提示
+        if (initialFlightFrames < INITIAL_FLIGHT_DURATION) {
+             const remainingFrames = INITIAL_FLIGHT_DURATION - initialFlightFrames;
+             const remainingTime = Math.ceil(remainingFrames / 60); // 转换为秒
+             ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+             ctx.font = 'bold 20px Arial';
+             ctx.textAlign = 'center';
+             ctx.fillText(`准备: ${remainingTime}`, canvas.width / 2, 50);
+             ctx.textAlign = 'start'; // 重置对齐方式
+        }
+    }
+
+    // 游戏主循环
+    function gameLoop() {
+        update();
+        draw();
+
+        if (gameRunning) {
+            requestAnimationFrame(gameLoop);
+        }
+    }
+
+    // 跳跃事件
+    function jump() {
+        if (gameRunning) {
+             if (initialFlightFrames >= INITIAL_FLIGHT_DURATION) {
+                bird.velocity = JUMP_FORCE;
+             }
+             // 在初始平飞阶段点击不提前结束，保持原设计
+        }
+    }
+
+    // 开始游戏
+    function startGame() {
+        initGame();
+        gameRunning = true;
+        startScreen.style.display = 'none';
+        gameOverScreen.style.display = 'none';
+        gameLoop();
+    }
+
+    // 结束游戏
+    function endGame() {
+        gameRunning = false;
+        finalScoreElement.textContent = score;
+        gameOverScreen.style.display = 'flex';
+        countdownMessageElement.textContent = ""; // 清空之前的消息
+
+        let countdown = GAME_OVER_DELAY / 1000; // 将毫秒转换为秒
+
+        // 立即显示初始倒计时
+        countdownMessageElement.textContent = `${countdown} 秒后关闭窗口...`;
+
+        // 启动倒计时
+        countdownInterval = setInterval(() => {
+            countdown--;
+            if (countdown > 0) {
+                countdownMessageElement.textContent = `${countdown} 秒后关闭窗口...`;
+            } else {
+                // 倒计时结束
+                clearInterval(countdownInterval);
+                countdownMessageElement.textContent = "正在关闭窗口...";
+                
+                // 设置最终关闭窗口的定时器
+                closeWindowTimeout = setTimeout(() => {
+                    // 尝试关闭窗口
+                    window.close();
+                    
+                    // 如果 window.close() 被浏览器阻止，
+                    // 可以在这里添加一些备选方案，例如：
+                    // 1. 显示一条消息提示用户手动关闭
+                    // 2. 跳转到一个空白页面
+                    // 3. 或者简单地停止所有游戏逻辑
+                    
+                    // 示例：显示提示信息（可选）
+                    // console.log("尝试关闭窗口，如果未关闭，请手动关闭标签页。");
+                    // gameOverScreen.innerHTML = "<div>游戏结束</div><div>请手动关闭此标签页</div>";
+                    
+                }, 1000); // 倒计时结束后1秒执行关闭
+            }
+        }, 1000); // 每秒更新一次倒计时
+    }
+
+    // 事件监听
+    canvas.addEventListener('click', jump);
+    startButton.addEventListener('click', startGame);
+    // 移除了 restartButton 的事件监听
+
+    // 初始状态：显示开始界面
+    initGame();
+    draw(); // 绘制初始画面
+</script>
+
+</body>
+</html>
